@@ -5,8 +5,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 func findSmallFactors(cofactor *big.Int) []*big.Int {
@@ -48,15 +46,15 @@ func findElementOfOrder(order, p *big.Int) (*big.Int, error) {
 	return h, nil
 }
 
-func bruteForcedMAC(digest []byte, h, order, p *big.Int, dh func(*big.Int) []byte) (*big.Int, error) {
+func bruteForcedMAC(digest []byte, h, order, p *big.Int) (*big.Int, error) {
 
 	if new(big.Int).Exp(h, order, p).Cmp(Big1) != 0 {
 		return nil, fmt.Errorf("element h should have had order order")
 	}
 
 	for i := int64(1); i <= order.Int64(); i++ {
-		public := new(big.Int).Exp(h, new(big.Int).SetInt64(i), order)
-		candidate := dh(public)
+		public := new(big.Int).Exp(h, new(big.Int).SetInt64(i), p)
+		candidate := mixKey(public.Bytes())
 
 		if bytes.Compare(candidate, digest) == 0 {
 			return new(big.Int).SetInt64(i), nil
@@ -78,7 +76,7 @@ func runDHSmallSubgroupAttack(p, cofactor *big.Int, dh func(*big.Int) []byte) (p
 		}
 		digest := dh(h)
 
-		b, err := bruteForcedMAC(digest, h, order, p, dh)
+		b, err := bruteForcedMAC(digest, h, order, p)
 		if err != nil {
 			fmt.Printf("Error: %v", err)
 			break
@@ -86,8 +84,6 @@ func runDHSmallSubgroupAttack(p, cofactor *big.Int, dh func(*big.Int) []byte) (p
 		B = append(B, b)
 		R = append(R, order)
 	}
-
-	spew.Dump(B, R)
 
 	priv, _, err := crt(B, R)
 	if err != nil {
