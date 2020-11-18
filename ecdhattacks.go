@@ -1,15 +1,84 @@
 package dhpals
 
 import (
+	"bytes"
 	"math/big"
 
 	"github.com/dnkolegov/dhpals/elliptic"
 	"github.com/dnkolegov/dhpals/x128"
 )
 
+func findSmallFactors(cofactor *big.Int) []*big.Int {
+	var factors []*big.Int
+	for i := 2; i < 1<<16; i++ {
+		I := new(big.Int).SetInt64(int64(i))
+		z := new(big.Int).Mod(cofactor, I)
+		if z.Cmp(Big0) == 0 {
+			factors = append(factors, I)
+			for new(big.Int).Mod(cofactor, I).Cmp(Big0) == 0 {
+				cofactor = new(big.Int).Div(cofactor, I)
+			}
+		}
+		if I.Cmp(cofactor) == 1 {
+			break
+		}
+	}
+	return factors
+}
+
+func findGenerator(order *big.Int, curve elliptic.Curve) (*big.Int, *big.Int) {
+
+	for {
+		x, y := elliptic.GeneratePoint(curve)
+		if x == nil || y == nil {
+			continue
+		}
+		gx, gy := curve.ScalarMult(x, y, new(big.Int).Div(curve.Params().P, order).Bytes())
+		if gx.Cmp(Big0) == 0 && gy.Cmp(Big0) == 0 {
+			continue
+		} else {
+			return gx, gy
+		}
+	}
+}
+
 func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) {
-	panic("not implemented")
-	return
+
+	badCurve := []elliptic.Curve{elliptic.P128V1(), elliptic.P128V2(), elliptic.P128V3()}
+	var B, R []*big.Int
+
+	for _, curve := range badCurve {
+		factors := findSmallFactors(curve.Params().N)
+		for _, order := range factors {
+
+			x, y := findGenerator(order, curve)
+
+			msg := ecdh(x, y)
+
+			for b := Big1; b.Cmp(order) < 0; b.Add(b, Big1) {
+
+				cX, cY := curve.ScalarMult(x, y, b.Bytes())
+				cur := append(cX.Bytes(), cY.Bytes()...)
+				k := mixKey(cur)
+
+				if bytes.Compare(msg, k) == 0 {
+					B = append(B, b)
+					R = append(R, order)
+					break
+				}
+
+			}
+
+		}
+
+	}
+	x, _, err := crt(B, R)
+	if err != nil {
+		println(err)
+		return nil
+	}
+
+	return x
 }
 
 func runECDHSmallSubgroupAttack(curve elliptic.Curve, ecdh func(x, y *big.Int) []byte) (priv *big.Int) {

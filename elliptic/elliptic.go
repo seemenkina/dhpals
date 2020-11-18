@@ -8,6 +8,11 @@ import (
 	"sync"
 )
 
+var Big0 = big.NewInt(0)
+var Big1 = big.NewInt(1)
+var Big2 = big.NewInt(2)
+var Big3 = big.NewInt(3)
+
 // A Curve represents a short-form Weierstrass curve y^2 = x^3 - a*x + b.
 type Curve interface {
 	// Params returns the parameters for the curve.
@@ -41,26 +46,106 @@ func (curve *CurveParams) Params() *CurveParams {
 	return curve
 }
 
+// polynomial returns x³ - ax + b.
+func (curve *CurveParams) polynomial(x *big.Int) *big.Int {
+	x3 := new(big.Int).Mul(x, x)
+	x3.Mul(x3, x)
+
+	aX := new(big.Int).Mul(curve.A, x)
+
+	x3.Sub(x3, aX)
+	x3.Add(x3, curve.B)
+	x3.Mod(x3, curve.P)
+
+	return x3
+}
+
 func (curve *CurveParams) IsOnCurve(x, y *big.Int) bool {
 	// y^2 = x^3 - a*x + b
-	panic("not implemented")
-	return false
+	newY := new(big.Int).Mul(y, y)
+	newY.Mod(newY, curve.P)
+	return curve.polynomial(x).Cmp(newY) == 0
 }
 
 // Add takes two points (x1, y1) and (x2, y2) and returns their sum.
 // It is assumed that "point at infinity" is (0, 0).
 func (curve *CurveParams) Add(x1, y1, x2, y2 *big.Int) (x, y *big.Int) {
-	panic("not implemented")
-	return nil, nil
+
+	m := new(big.Int)
+
+	if x1.Cmp(Big0) == 0 && y1.Cmp(Big0) == 0 {
+		return x2, y2
+	}
+
+	if x2.Cmp(Big0) == 0 && y2.Cmp(Big0) == 0 {
+		return x1, y1
+	}
+
+	ix, iy := Inverse(curve, x2, y2)
+	if x1.Cmp(ix) == 0 && y1.Cmp(iy) == 0 {
+		return Big0, Big0
+	}
+
+	if x1.Cmp(x2) == 0 && y1.Cmp(y2) == 0 {
+		// m := (3*x1^2 - a) / 2*y1
+		divisor := new(big.Int).Mul(Big3, new(big.Int).Mul(x1, x1))
+		divisor.Mod(divisor, curve.P)
+		divisor.Sub(divisor, curve.A)
+
+		dividend := new(big.Int).Mul(Big2, y1)
+		dividend.ModInverse(dividend, curve.P)
+
+		m = new(big.Int).Mul(divisor, dividend)
+		m.Mod(m, curve.P)
+
+	} else {
+		// m := (y2 - y1) / (x2 - x1)
+		divisor := new(big.Int).Sub(y2, y1)
+		dividend := new(big.Int).Sub(x2, x1)
+		dividend.ModInverse(dividend, curve.P)
+
+		m = new(big.Int).Mul(divisor, dividend)
+		m.Mod(m, curve.P)
+	}
+	// x3 := m^2 - x1 - x2
+	x3 := new(big.Int).Sub(new(big.Int).Sub(new(big.Int).Mul(m, m), x1), x2)
+	x3.Mod(x3, curve.P)
+
+	// y3 := m*(x1 - x3) - y1
+	subX := new(big.Int).Sub(x1, x3)
+	y3 := new(big.Int).Mul(m, subX)
+	y3.Sub(y3, y1)
+	y3.Mod(y3, curve.P)
+
+	return x3, y3
 }
 
 func (curve *CurveParams) Double(x1, y1 *big.Int) (x, y *big.Int) {
 	return curve.Add(x1, y1, x1, y1)
 }
 
+func isOdd(i *big.Int) bool {
+	repr := i.Bytes()
+	return repr[len(repr)-1]&0x01 != 0
+}
+
 func (curve *CurveParams) ScalarMult(xIn, yIn *big.Int, k []byte) (x, y *big.Int) {
-	panic("not implemented")
-	return nil, nil
+	n := new(big.Int).SetBytes(k)
+	x, y = Big0, Big0
+
+	if len(k) == 0 {
+		return x, y
+	}
+
+	for n.Cmp(Big0) > 0 {
+		if isOdd(n) {
+			x, y = curve.Add(x, y, xIn, yIn)
+		}
+		xIn, yIn = curve.Double(xIn, yIn)
+		n.Rsh(n, 1)
+	}
+
+	return x, y
 }
 
 func (curve *CurveParams) ScalarBaseMult(k []byte) (x, y *big.Int) {
@@ -102,6 +187,10 @@ func GeneratePoint(curve Curve) (*big.Int, *big.Int) {
 	x, err := rand.Int(rand.Reader, curve.Params().P)
 	if err != nil {
 		panic(err)
+	}
+
+	if x == nil {
+		x.Add(x, curve.Params().Gx)
 	}
 
 	x3 := new(big.Int).Mul(x, x)
