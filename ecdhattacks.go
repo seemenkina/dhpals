@@ -33,7 +33,7 @@ func findGenerator(order *big.Int, curve elliptic.Curve) (*big.Int, *big.Int) {
 		if x == nil || y == nil {
 			continue
 		}
-		gx, gy := curve.ScalarMult(x, y, new(big.Int).Div(curve.Params().P, order).Bytes())
+		gx, gy := curve.ScalarMult(x, y, new(big.Int).Div(curve.Params().N, order).Bytes())
 		if gx.Cmp(Big0) == 0 && gy.Cmp(Big0) == 0 {
 			continue
 		} else {
@@ -64,7 +64,6 @@ func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) 
 				if bytes.Compare(msg, k) == 0 {
 					B = append(B, b)
 					R = append(R, order)
-					break
 				}
 
 			}
