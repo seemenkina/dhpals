@@ -8,10 +8,10 @@ import (
 	"sync"
 )
 
-var Big0 = big.NewInt(0)
-var Big1 = big.NewInt(1)
-var Big2 = big.NewInt(2)
-var Big3 = big.NewInt(3)
+var BigZero = big.NewInt(0)
+var BigOne = big.NewInt(1)
+var BigTwo = big.NewInt(2)
+var BigThree = big.NewInt(3)
 
 // A Curve represents a short-form Weierstrass curve y^2 = x^3 - a*x + b.
 type Curve interface {
@@ -73,26 +73,26 @@ func (curve *CurveParams) Add(x1, y1, x2, y2 *big.Int) (x, y *big.Int) {
 
 	m := new(big.Int)
 
-	if x1.Cmp(Big0) == 0 && y1.Cmp(Big0) == 0 {
+	if x1.Cmp(BigZero) == 0 && y1.Cmp(BigZero) == 0 {
 		return x2, y2
 	}
 
-	if x2.Cmp(Big0) == 0 && y2.Cmp(Big0) == 0 {
+	if x2.Cmp(BigZero) == 0 && y2.Cmp(BigZero) == 0 {
 		return x1, y1
 	}
 
 	ix, iy := Inverse(curve, x2, y2)
 	if x1.Cmp(ix) == 0 && y1.Cmp(iy) == 0 {
-		return Big0, Big0
+		return BigZero, BigZero
 	}
 
 	if x1.Cmp(x2) == 0 && y1.Cmp(y2) == 0 {
 		// m := (3*x1^2 + a) / 2*y1
-		divisor := new(big.Int).Mul(Big3, new(big.Int).Mul(x1, x1))
+		divisor := new(big.Int).Mul(BigThree, new(big.Int).Mul(x1, x1))
 		divisor.Mod(divisor, curve.P)
 		divisor.Add(divisor, curve.A)
 
-		dividend := new(big.Int).Mul(Big2, y1)
+		dividend := new(big.Int).Mul(BigTwo, y1)
 		dividend.ModInverse(dividend, curve.P)
 
 		m = new(big.Int).Mul(divisor, dividend)
@@ -131,13 +131,13 @@ func isOdd(i *big.Int) bool {
 
 func (curve *CurveParams) ScalarMult(xIn, yIn *big.Int, k []byte) (x, y *big.Int) {
 	n := new(big.Int).SetBytes(k)
-	x, y = Big0, Big0
+	x, y = BigZero, BigZero
 
 	if len(k) == 0 {
 		return x, y
 	}
 
-	for n.Cmp(Big0) > 0 {
+	for n.Cmp(BigZero) > 0 {
 		if isOdd(n) {
 			x, y = curve.Add(x, y, xIn, yIn)
 		}
@@ -184,24 +184,26 @@ func Inverse(curve Curve, x, y *big.Int) (ix *big.Int, iy *big.Int) {
 }
 
 func GeneratePoint(curve Curve) (*big.Int, *big.Int) {
-	x, err := rand.Int(rand.Reader, curve.Params().P)
-	if err != nil {
-		panic(err)
+	for {
+		x, err := rand.Int(rand.Reader, curve.Params().P)
+
+		if err != nil {
+			panic(err)
+		}
+
+		x3 := new(big.Int).Mul(x, x)
+		x3.Mul(x3, x)
+
+		ax := new(big.Int).Mul(curve.Params().A, x)
+		x3.Add(x3, ax)
+		x3.Add(x3, curve.Params().B)
+		x3.Mod(x3, curve.Params().P)
+
+		y := new(big.Int).ModSqrt(x3, curve.Params().P)
+		if y != nil {
+			return x, y
+		}
 	}
-
-	if x == nil {
-		x.Add(x, curve.Params().Gx)
-	}
-
-	x3 := new(big.Int).Mul(x, x)
-	x3.Mul(x3, x)
-
-	ax := new(big.Int).Mul(curve.Params().A, x)
-	x3.Sub(x3, ax)
-	x3.Add(x3, curve.Params().B)
-	x3.Mod(x3, curve.Params().P)
-
-	return x, new(big.Int).ModSqrt(x3, curve.Params().P)
 }
 
 // Marshal converts a point into the uncompressed form specified in section 4.3.6 of ANSI X9.62.

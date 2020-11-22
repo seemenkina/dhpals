@@ -8,14 +8,17 @@ import (
 	"github.com/dnkolegov/dhpals/x128"
 )
 
+var BigZero = big.NewInt(0)
+var BigOne = big.NewInt(1)
+
 func findSmallFactors(cofactor *big.Int) []*big.Int {
 	var factors []*big.Int
 	for i := 2; i < 1<<16; i++ {
 		I := new(big.Int).SetInt64(int64(i))
 		z := new(big.Int).Mod(cofactor, I)
-		if z.Cmp(Big0) == 0 {
+		if z.Cmp(BigZero) == 0 {
 			factors = append(factors, I)
-			for new(big.Int).Mod(cofactor, I).Cmp(Big0) == 0 {
+			for new(big.Int).Mod(cofactor, I).Cmp(BigZero) == 0 {
 				cofactor = new(big.Int).Div(cofactor, I)
 			}
 		}
@@ -30,11 +33,9 @@ func findGenerator(order *big.Int, curve elliptic.Curve) (*big.Int, *big.Int) {
 
 	for {
 		x, y := elliptic.GeneratePoint(curve)
-		if x == nil || y == nil {
-			continue
-		}
+
 		gx, gy := curve.ScalarMult(x, y, new(big.Int).Div(curve.Params().N, order).Bytes())
-		if gx.Cmp(Big0) == 0 && gy.Cmp(Big0) == 0 {
+		if gx.Cmp(BigZero) == 0 && gy.Cmp(BigZero) == 0 {
 			continue
 		} else {
 			return gx, gy
@@ -45,7 +46,7 @@ func findGenerator(order *big.Int, curve elliptic.Curve) (*big.Int, *big.Int) {
 func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) {
 
 	badCurve := []elliptic.Curve{elliptic.P128V1(), elliptic.P128V2(), elliptic.P128V3()}
-	var B, R []*big.Int
+	var A, N []*big.Int
 
 	for _, curve := range badCurve {
 		factors := findSmallFactors(curve.Params().N)
@@ -55,15 +56,15 @@ func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) 
 
 			msg := ecdh(x, y)
 
-			for b := Big1; b.Cmp(order) < 0; b.Add(b, Big1) {
+			for a := BigOne; a.Cmp(order) <= 0; a.Add(a, BigOne) {
 
-				cX, cY := curve.ScalarMult(x, y, b.Bytes())
+				cX, cY := curve.ScalarMult(x, y, a.Bytes())
 				cur := append(cX.Bytes(), cY.Bytes()...)
 				k := mixKey(cur)
 
 				if bytes.Compare(msg, k) == 0 {
-					B = append(B, b)
-					R = append(R, order)
+					A = append(A, a)
+					N = append(N, order)
 				}
 
 			}
@@ -71,7 +72,7 @@ func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) 
 		}
 
 	}
-	x, _, err := crt(B, R)
+	x, _, err := crt(A, N)
 	if err != nil {
 		println(err)
 		return nil
