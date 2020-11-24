@@ -13,7 +13,7 @@ var BigOne = big.NewInt(1)
 
 func findSmallFactors(cofactor *big.Int) []*big.Int {
 	var factors []*big.Int
-	for i := 2; i < 1<<16; i++ {
+	for i := 3; i < 1<<16; i += 2 {
 		I := new(big.Int).SetInt64(int64(i))
 		z := new(big.Int).Mod(cofactor, I)
 		if z.Cmp(BigZero) == 0 {
@@ -56,15 +56,23 @@ func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) 
 
 			msg := ecdh(x, y)
 
-			for a := BigOne; a.Cmp(order) <= 0; a.Add(a, BigOne) {
-
+			for a := BigOne; a.Cmp(order) <= 0; a = new(big.Int).Add(a, BigOne) {
 				cX, cY := curve.ScalarMult(x, y, a.Bytes())
 				cur := append(cX.Bytes(), cY.Bytes()...)
 				k := mixKey(cur)
 
 				if bytes.Compare(msg, k) == 0 {
-					A = append(A, a)
-					N = append(N, order)
+					flag := true
+					for i := 0; i < len(A) && i < len(N); i++ {
+						if A[i].Cmp(a) == 0 && N[i].Cmp(order) == 0 {
+							flag = false
+						}
+					}
+					if flag {
+						A = append(A, a)
+						N = append(N, order)
+						break
+					}
 				}
 
 			}
@@ -72,6 +80,7 @@ func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) 
 		}
 
 	}
+
 	x, _, err := crt(A, N)
 	if err != nil {
 		println(err)
