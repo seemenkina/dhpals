@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/davecgh/go-spew/spew"
@@ -172,11 +173,77 @@ func findAllPointsOfPrimeOrderOnX128() (points []twistPoint) {
 	return
 }
 
+func getK(a, b *big.Int) *big.Int {
+	t0 := new(big.Int).Sub(b, a)
+
+	t1 := math.Log2(float64(t0.Int64()))
+	t2 := math.Log2(t1)
+
+	res := t1 + t2 - 2
+	return new(big.Int).SetUint64(uint64(res))
+}
+
+func f(u, k *big.Int) *big.Int {
+	res := new(big.Int).Lsh(big.NewInt(1), uint(u.Uint64()%k.Uint64()))
+	return res
+}
+
+func computeN(k *big.Int) *big.Int {
+
+	N := big.NewInt(0)
+	for i := big.NewInt(0); i.Cmp(k) <= 0; i = new(big.Int).Add(i, BigOne) {
+		N.Add(N, f(i, k))
+	}
+	N.Div(N, new(big.Int).Rsh(k, 2))
+
+	return N
+}
+
 // catchKangarooOnMontgomeryCurve implements Pollard's kangaroo algorithm on a curve.
-func catchKangarooOnCurve(curve elliptic.Curve, bx, by, x, y, a, b *big.Int) (m *big.Int, err error) {
+func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
 	// k is calculated based on a formula in this paper: https://arxiv.org/pdf/0812.0789.pdf
-	panic("not implemented")
-	return
+	k := getK(a, b)
+	N := computeN(k)
+
+	xTame, yTame := big.NewInt(0), x128.ScalarBaseMult(b.Bytes())
+
+	for i := uint64(0); i < N.Uint64(); i++ {
+		xTame.Add(xTame, f(yTame, k))
+
+		yTame.Mul(yTame, x128.ScalarBaseMult(f(yTame, k).Bytes()))
+		yTame.Mod(yTame, x128.P)
+	}
+
+	x := x128.ScalarBaseMult(new(big.Int).Add(b, xTame).Bytes())
+	spew.Dump(x, yTame)
+
+	if yTame.Cmp(x) != 0 {
+		return nil, fmt.Errorf("yTame == (b + xTame) * U should be true")
+	}
+
+	xWild, yWild := big.NewInt(0), new(big.Int).Set(u)
+
+	upperLimit := new(big.Int).Add(xTame, b)
+
+	for xWild.Cmp(upperLimit) < 0 {
+		xWild.Add(xWild, f(yWild, k))
+
+		yWild.Mul(yWild, x128.ScalarBaseMult(f(yWild, k).Bytes()))
+		yWild.Mod(yWild, x128.P)
+
+		if yWild.Cmp(yTame) == 0 {
+			x := x128.ScalarBaseMult(new(big.Int).Add(b, xWild).Bytes())
+			if yTame.Cmp(x) != 0 {
+				return nil, fmt.Errorf("yWild == (b + xWild) * P should be true")
+			}
+
+			m = new(big.Int).Sub(xTame, xWild)
+			m.Add(m, b)
+			return m, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no result was found")
 }
 
 func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() (*big.Int, *big.Int), privateKeyOracle func(*big.Int) *big.Int) (priv *big.Int) {
@@ -204,7 +271,6 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() (*big.
 					break
 				}
 			}
-
 		}
 	}
 
