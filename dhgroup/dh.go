@@ -79,6 +79,25 @@ func (g GroupParams) DH(private, public *big.Int) (*big.Int, error) {
 	return result, nil
 }
 
+func (g GroupParams) SecureDH(private, public *big.Int) (*big.Int, error) {
+
+	checkP := new(big.Int).Mul(g.Q, big.NewInt(2))
+	checkP.Add(checkP, big.NewInt(1))
+	if checkP.Cmp(g.P) != 0 {
+		return nil, fmt.Errorf("p is not safe prime")
+	}
+
+	if public.Cmp(new(big.Int).Sub(g.P, big.NewInt(2))) > 0 && public.Cmp(big.NewInt(2)) < 0 {
+		return nil, fmt.Errorf("public key, should be 1 < public < p")
+	}
+	check := new(big.Int).Exp(public, g.Q, g.P)
+	if check.Cmp(big.NewInt(1)) == 0 {
+		return nil, fmt.Errorf("if public is a member of the supergroup, that public is not the identity element ")
+	}
+	result := new(big.Int).Exp(public, private, g.P)
+	return result, nil
+}
+
 func (g GroupParams) DHLen() int {
 	return g.BitSize
 }
