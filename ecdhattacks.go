@@ -122,6 +122,21 @@ func findSmallTwistFactors(factor *big.Int) []*big.Int {
 	return factors
 }
 
+func poly(u *big.Int) *big.Int {
+	u3 := new(big.Int).Mul(u, u)
+	u3.Mul(u3, u)
+
+	u2 := new(big.Int).Mul(u, u)
+	u2.Mul(u2, x128.A)
+
+	u3.Add(u3, u2)
+	u3.Add(u3, u)
+	u3.Mod(u3, x128.P)
+
+	v := new(big.Int).ModSqrt(u3, x128.P)
+	return v
+}
+
 func findTwistGenerator(order *big.Int) *big.Int {
 
 	twistOrder := getTwistOrder(x128.P, x128.N)
@@ -132,18 +147,8 @@ func findTwistGenerator(order *big.Int) *big.Int {
 		if err != nil {
 			continue
 		}
-		u3 := new(big.Int).Mul(u, u)
-		u3.Mul(u3, u)
 
-		u2 := new(big.Int).Mul(u, u)
-		u2.Mul(u2, x128.A)
-
-		u3.Add(u3, u2)
-		u3.Add(u3, u)
-		u3.Mod(u3, x128.P)
-
-		v := new(big.Int).ModSqrt(u3, x128.P)
-		if v == nil {
+		if v := poly(u); v == nil {
 			possibleGen := x128.ScalarMult(u, ord.Bytes())
 			if possibleGen.Cmp(BigZero) == 0 {
 				continue
@@ -206,16 +211,19 @@ func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
 	N := computeN(k)
 
 	xTame, yTame := big.NewInt(0), x128.ScalarBaseMult(b.Bytes())
+	wY := big.NewInt(1)
 
 	for i := uint64(0); i < N.Uint64(); i++ {
 		xTame.Add(xTame, f(yTame, k))
-
-		yTame.Mul(yTame, x128.ScalarBaseMult(f(yTame, k).Bytes()))
-		yTame.Mod(yTame, x128.P)
+		yTame, wY = elliptic.P128().Add(new(big.Int).Add(yTame, big.NewInt(178)), wY,
+			new(big.Int).Add(f(yTame, k), big.NewInt(178)), big.NewInt(1))
+		// yTame.Sub(yTame, big.NewInt(178))
+		// yTame, _ = combine(yTame, poly(yTame), f(yTame, k), poly(f(yTame, k)))
 	}
 
+	yTame.Mod(yTame, x128.P)
 	x := x128.ScalarBaseMult(new(big.Int).Add(b, xTame).Bytes())
-	spew.Dump(x, yTame)
+	fmt.Printf(" x: %d\nyT: %d\n", x, yTame)
 
 	if yTame.Cmp(x) != 0 {
 		return nil, fmt.Errorf("yTame == (b + xTame) * U should be true")
@@ -228,12 +236,13 @@ func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
 	for xWild.Cmp(upperLimit) < 0 {
 		xWild.Add(xWild, f(yWild, k))
 
-		yWild.Mul(yWild, x128.ScalarBaseMult(f(yWild, k).Bytes()))
+		yWild.Add(yWild, x128.ScalarBaseMult(f(yWild, k).Bytes()))
 		yWild.Mod(yWild, x128.P)
 
 		if yWild.Cmp(yTame) == 0 {
+
 			x := x128.ScalarBaseMult(new(big.Int).Add(b, xWild).Bytes())
-			if yTame.Cmp(x) != 0 {
+			if yWild.Cmp(x) != 0 {
 				return nil, fmt.Errorf("yWild == (b + xWild) * P should be true")
 			}
 
