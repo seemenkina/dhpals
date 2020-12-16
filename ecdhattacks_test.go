@@ -139,3 +139,37 @@ func TestTwistAttack(t *testing.T) {
 
 	fmt.Print(privateKey)
 }
+
+func Test_findTwistGenerator(t *testing.T) {
+	type args struct {
+		order *big.Int
+		p     *big.Int
+		q     *big.Int
+	}
+	tests := []struct {
+		name string
+		args args
+		// want *big.Int
+	}{
+		{"x128-N", args{
+			p: x128.P,
+			q: x128.N,
+		}},
+		{"x128-Q", args{
+			p: x128.P,
+			q: x128.Q,
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := getTwistOrder(tt.args.p, tt.args.q)
+			t.Logf("getTwistOrder() = %v", r)
+			factors := findSmallTwistFactors(r)
+			t.Logf("findSmallTwistFactors() = %v", factors)
+			for _, f := range factors {
+				got := findTwistGenerator(f, r)
+				t.Logf("findTwistGenerator() = %v, of order %v", got, f)
+			}
+		})
+	}
+}
