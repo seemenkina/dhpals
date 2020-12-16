@@ -151,9 +151,9 @@ func montgomeryPoly(u *big.Int) *big.Int {
 	return v
 }
 
-// Finds possibleKey generator of possibleKey subgroup of E(GF(p)) of required order
-// param order -- the order the generator must have, it must be possibleKey divisor of the order of the twist of this curve
-// return the u coordinate of possibleKey generator of the twist curve satisfying the order given
+// Finds a generator of a subgroup of E(GF(p)) of required order
+// param order -- the order the generator must have, it must be a divisor of the order of the twist of this curve
+// return the u coordinate of a generator of the twist curve satisfying the order given
 func findTwistGenerator(order, twistOrder *big.Int) *big.Int {
 
 	ord := new(big.Int).Div(twistOrder, order)
@@ -182,7 +182,7 @@ func getTwistOrder(p, q *big.Int) *big.Int {
 	return o.Sub(o, q)
 }
 
-// findAllPointsOfPrimeOrderOnX128 finds possibleKey point with possibleKey specified order for u^3 + A*u^2 + u in GF(p).
+// findAllPointsOfPrimeOrderOnX128 finds a point with a specified order for u^3 + A*u^2 + u in GF(p).
 func findAllPointsOfPrimeOrderOnX128() (points []twistPoint) {
 	// It is known, that both curves contain 2*p+2 points: |E| + |T| = 2*p + 2
 	twistOrder := getTwistOrder(x128.P, x128.N)
@@ -222,9 +222,9 @@ func computeN(k *big.Int) *big.Int {
 	return N
 }
 
-// catchKangarooOnMontgomeryCurve implements Pollard's kangaroo algorithm on possibleKey curve.
+// catchKangarooOnMontgomeryCurve implements Pollard's kangaroo algorithm on a curve.
 func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
-	// K is calculated based on possibleKey formula in this paper: https://arxiv.org/pdf/0812.0789.pdf
+	// K is calculated based on a formula in this paper: https://arxiv.org/pdf/0812.0789.pdf
 	K := getK(a, b)
 	N := computeN(K)
 
