@@ -148,6 +148,9 @@ func montgomeryPoly(u *big.Int) *big.Int {
 	u3.Mod(u3, x128.P)
 
 	v := new(big.Int).ModSqrt(u3, x128.P)
+	if v == nil {
+		v = big.NewInt(0)
+	}
 	return v
 }
 
@@ -228,24 +231,19 @@ func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
 	K := getK(a, b)
 	N := computeN(K)
 
-	// xTame, yTame := 0, u
+	// xTame, yTame := 0, b * baseU
 	xTame, yTame := big.NewInt(0), x128.ScalarBaseMult(b.Bytes())
-	wY := big.NewInt(1)
 
 	for i := uint64(0); i < N.Uint64(); i++ {
 		xTame.Add(xTame, f(yTame, K))
-		yTame, wY = elliptic.P128().Add(new(big.Int).Add(yTame, big.NewInt(178)), wY,
-			new(big.Int).Add(f(yTame, K), big.NewInt(178)), big.NewInt(1))
-		// yTame.Sub(yTame, big.NewInt(178))
-		// yTame, _ = combine(yTame, montgomeryPoly(yTame), f(yTame, K), montgomeryPoly(f(yTame, K)))
+		yTame = combine(yTame, x128.ScalarBaseMult(f(yTame, K).Bytes()))
 	}
 
-	yTame.Mod(yTame, x128.P)
 	x := x128.ScalarBaseMult(new(big.Int).Add(b, xTame).Bytes())
 	fmt.Printf(" x: %d\nyT: %d\n", x, yTame)
 
 	if yTame.Cmp(x) != 0 {
-		return nil, fmt.Errorf("yTame == (b + xTame) * U should be true")
+		return nil, fmt.Errorf("yTame == (b + xTame) * baseU should be true")
 	}
 
 	xWild, yWild := big.NewInt(0), new(big.Int).Set(u)
@@ -253,18 +251,18 @@ func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
 	upperLimit := new(big.Int).Add(xTame, b)
 
 	for xWild.Cmp(upperLimit) < 0 {
-		xWild.Add(xWild, f(yWild, K))
 
-		yWild.Add(yWild, x128.ScalarBaseMult(f(yWild, K).Bytes()))
-		yWild.Mod(yWild, x128.P)
+		xWild.Add(xWild, f(yWild, K))
+		yWild = combine(yWild, x128.ScalarBaseMult(f(yWild, K).Bytes()))
+
+		x := x128.ScalarBaseMult(new(big.Int).Add(b, xWild).Bytes())
+		fmt.Printf(" x: %d\nyW: %d\n", x, yWild)
+
+		if yWild.Cmp(x) != 0 {
+			return nil, fmt.Errorf("yWild == (b + xWild) * baseU should be true")
+		}
 
 		if yWild.Cmp(yTame) == 0 {
-
-			x := x128.ScalarBaseMult(new(big.Int).Add(b, xWild).Bytes())
-			if yWild.Cmp(x) != 0 {
-				return nil, fmt.Errorf("yWild == (b + xWild) * P should be true")
-			}
-
 			m = new(big.Int).Sub(xTame, xWild)
 			m.Add(m, b)
 			return m, nil
@@ -272,6 +270,21 @@ func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
 	}
 
 	return nil, fmt.Errorf("no result was found")
+}
+
+func combine(firstU, secondU *big.Int) *big.Int {
+	firstW := montgomeryPoly(firstU)
+	firstU.Add(firstU, big.NewInt(178))
+	secondW := montgomeryPoly(secondU)
+	secondU.Add(secondU, big.NewInt(178))
+
+	u, v := elliptic.P128().Add(firstU, firstW, secondU, secondW)
+	u.Sub(u, big.NewInt(178))
+	if x128.IsOnCurve(u, v) {
+		return u
+	} else {
+		panic("u, v are not on x128 curve")
+	}
 }
 
 func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() (*big.Int, *big.Int), privateKeyOracle func(*big.Int) *big.Int) (priv *big.Int) {
