@@ -104,14 +104,15 @@ var ecKangarooTests = []ecKangarooTest{
 }
 
 func TestECKangarooAlgorithm(t *testing.T) {
+	curve := elliptic.P128()
 	a := new(big.Int).Set(Big0)
-	bu := x128.U
+	bx, by := curve.Params().Gx, curve.Params().Gy
 	for _, e := range ecKangarooTests {
 		k, _ := new(big.Int).SetString(e.k, 10)
 		b, _ := new(big.Int).SetString(e.b, 10)
 
-		u := x128.ScalarBaseMult(k.Bytes())
-		kk, err := catchKangarooOnCurve(bu, u, a, b)
+		x, y := curve.ScalarBaseMult(k.Bytes())
+		kk, err := catchKangarooOnCurve(curve, bx, by, x, y, a, b)
 		if err != nil {
 			t.Fatalf("%s: %s", t.Name(), err)
 		}

@@ -140,17 +140,15 @@ func montgomeryPoly(u *big.Int) *big.Int {
 
 	// A*u^2
 	u2 := new(big.Int).Mul(u, u)
-	u2.Mul(u2, x128.A)
+	u2.Mul(u2, new(big.Int).Set(x128.A))
 
 	// (u^3 + Au^2 + u) mod P
 	u3.Add(u3, u2)
 	u3.Add(u3, u)
 	u3.Mod(u3, x128.P)
 
-	v := new(big.Int).ModSqrt(u3, x128.P)
-	if v == nil {
-		v = big.NewInt(0)
-	}
+	v := new(big.Int).ModSqrt(u3, new(big.Int).Set(x128.P))
+
 	return v
 }
 
@@ -225,44 +223,57 @@ func computeN(k *big.Int) *big.Int {
 	return N
 }
 
+func MontgomeryToWeierstrass(u *big.Int) (*big.Int, []*big.Int, error) {
+	v := montgomeryPoly(u)
+	if v == nil {
+		return nil, nil, fmt.Errorf("no v coordinate on curve x128 for u coordinate")
+	}
+	yS := []*big.Int{v, new(big.Int).Neg(v)}
+	x := new(big.Int).Add(u, big.NewInt(178))
+	if elliptic.P128().IsOnCurve(x, yS[0]) && elliptic.P128().IsOnCurve(x, yS[1]) {
+		return x, yS, nil
+	} else {
+		return nil, nil, fmt.Errorf("x, v are not on P128 curve")
+	}
+
+}
+
 // catchKangarooOnMontgomeryCurve implements Pollard's kangaroo algorithm on a curve.
-func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
+func catchKangarooOnCurve(curve elliptic.Curve, bx, by, x, y, a, b *big.Int) (m *big.Int, err error) {
 	// K is calculated based on a formula in this paper: https://arxiv.org/pdf/0812.0789.pdf
 	K := getK(a, b)
 	N := computeN(K)
 
-	// xTame, yTame := 0, b * baseU
-	xTame, yTame := big.NewInt(0), x128.ScalarBaseMult(b.Bytes())
+	// xTame, yTame := 0, b * base
+	xTame := big.NewInt(0)
+	xyTame, yyTame := curve.ScalarBaseMult(b.Bytes())
 
 	for i := uint64(0); i < N.Uint64(); i++ {
-		xTame.Add(xTame, f(yTame, K))
-		yTame = combine(yTame, x128.ScalarBaseMult(f(yTame, K).Bytes()))
+		xTame.Add(xTame, f(xyTame, K))
+		tmpX, tmpY := curve.ScalarBaseMult(f(xyTame, K).Bytes())
+		xyTame, yyTame = curve.Add(xyTame, yyTame, tmpX, tmpY)
 	}
 
-	x := x128.ScalarBaseMult(new(big.Int).Add(b, xTame).Bytes())
-	fmt.Printf(" x: %d\nyT: %d\n", x, yTame)
+	xB, yB := curve.ScalarBaseMult(new(big.Int).Add(b, xTame).Bytes())
 
-	if yTame.Cmp(x) != 0 {
-		return nil, fmt.Errorf("yTame == (b + xTame) * baseU should be true")
+	if xyTame.Cmp(xB) != 0 && yyTame.Cmp(yB) != 0 {
+		return nil, fmt.Errorf("yTame == (b + xTame) * base should be true")
 	}
-
-	xWild, yWild := big.NewInt(0), new(big.Int).Set(u)
+	// xWild, yWild := 0, (x,y)
+	xWild := big.NewInt(0)
+	xyWild, yyWild := x, y
 
 	upperLimit := new(big.Int).Add(xTame, b)
 
 	for xWild.Cmp(upperLimit) < 0 {
 
-		xWild.Add(xWild, f(yWild, K))
-		yWild = combine(yWild, x128.ScalarBaseMult(f(yWild, K).Bytes()))
+		xWild.Add(xWild, f(xyWild, K))
 
-		x := x128.ScalarBaseMult(new(big.Int).Add(b, xWild).Bytes())
-		fmt.Printf(" x: %d\nyW: %d\n", x, yWild)
+		tmpX, tmpY := curve.ScalarBaseMult(f(xyWild, K).Bytes())
+		xyWild, yyWild = curve.Add(xyWild, yyWild, tmpX, tmpY)
 
-		if yWild.Cmp(x) != 0 {
-			return nil, fmt.Errorf("yWild == (b + xWild) * baseU should be true")
-		}
-
-		if yWild.Cmp(yTame) == 0 {
+		if xyTame.Cmp(xyWild) == 0 && yyTame.Cmp(yyWild) == 0 {
+			fmt.Printf("xyWild: %d\nyyWild: %d\n", xyWild, yyWild)
 			m = new(big.Int).Sub(xTame, xWild)
 			m.Add(m, b)
 			return m, nil
@@ -270,21 +281,6 @@ func catchKangarooOnCurve(bu, u, a, b *big.Int) (m *big.Int, err error) {
 	}
 
 	return nil, fmt.Errorf("no result was found")
-}
-
-func combine(firstU, secondU *big.Int) *big.Int {
-	firstW := montgomeryPoly(firstU)
-	firstU.Add(firstU, big.NewInt(178))
-	secondW := montgomeryPoly(secondU)
-	secondU.Add(secondU, big.NewInt(178))
-
-	u, v := elliptic.P128().Add(firstU, firstW, secondU, secondW)
-	u.Sub(u, big.NewInt(178))
-	if x128.IsOnCurve(u, v) {
-		return u
-	} else {
-		panic("u, v are not on x128 curve")
-	}
 }
 
 func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() (*big.Int, *big.Int), privateKeyOracle func(*big.Int) *big.Int) (priv *big.Int) {
@@ -352,6 +348,7 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() (*big.
 				// pass
 			}
 		}
+		cancel()
 	}
 	close(chanIn)
 	wg.Wait()
