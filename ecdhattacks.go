@@ -353,13 +353,32 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() (*big.
 	close(chanIn)
 	wg.Wait()
 
-	x, _, err := crt(A, N)
+	candX, r, err := crt(A, N)
 	if err != nil {
 		println(err)
 	}
-	fmt.Printf("x:%d\n", x)
+	fmt.Printf("x:%d\n", candX)
 
-	return
+	a := big.NewInt(0)
+	b := new(big.Int).Sub(x128.Q, big.NewInt(1))
+	b.Div(b, r)
+
+	curve := elliptic.P128()
+	bx, by := curve.Params().Gx, curve.Params().Gy
+
+	xW, yWs, err := MontgomeryToWeierstrass(candX)
+	if err != nil {
+		return nil
+	}
+
+	tmpX, tmpY := curve.ScalarBaseMult(new(big.Int).Sub(curve.Params().P, r).Bytes())
+	x, y := curve.Add(xW, yWs[0], tmpX, tmpY)
+
+	priv, err = catchKangarooOnCurve(curve, bx, by, x, y, a, b)
+	if err != nil {
+		return nil
+	}
+	return priv
 }
 
 func bruteHash(point twistPoint, possibleKey *big.Int) []byte {
