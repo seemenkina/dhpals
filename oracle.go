@@ -87,7 +87,7 @@ func newECDHAttackOracle(curve elliptic.Curve) (
 func newX128TwistAttackOracle() (
 	ecdh func(x *big.Int) []byte,
 	isKeyCorrect func([]byte) bool,
-	getPublicKey func() (*big.Int, *big.Int),
+	getPublicKey func() *big.Int,
 	privateKeyOracle func(*big.Int) *big.Int,
 ) {
 
@@ -106,8 +106,8 @@ func newX128TwistAttackOracle() (
 		return bytes.Equal(priv, key)
 	}
 
-	getPublicKey = func() (*big.Int, *big.Int) {
-		return pub, new(big.Int).SetBytes(priv)
+	getPublicKey = func() *big.Int {
+		return pub
 	}
 
 	privateKeyOracle = func(q *big.Int) *big.Int {
