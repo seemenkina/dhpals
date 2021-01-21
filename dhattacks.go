@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 func findSmallFactors(cofactor *big.Int) []*big.Int {
@@ -97,19 +95,33 @@ func runDHSmallSubgroupAttack(p, cofactor *big.Int, dh func(*big.Int) []byte) (p
 	return priv
 }
 
+func getK(a, b *big.Int) *big.Int {
+	t0 := new(big.Int).Sub(b, a)
+	t0.Sqrt(t0)
+	t1 := math.Log2(float64(t0.Int64()))
+	t2 := math.Log2(t1)
+
+	res := t1 + t2 - 2
+	if res < 1 {
+		res = 1
+	}
+	return new(big.Int).SetUint64(uint64(res))
+}
+func f(y, k *big.Int) *big.Int {
+	return new(big.Int).Exp(Big2, new(big.Int).Mod(y, k), nil)
+}
+
 func computeN(k *big.Int) *big.Int {
 
 	N := Big0
 	for i := uint64(0); i < k.Uint64(); i++ {
 		N = new(big.Int).Add(N, f(big.NewInt(int64(i)), k))
 	}
-	N = new(big.Int).Mul(big.NewInt(4), new(big.Int).Div(N, k))
+	if k.Cmp(big.NewInt(0)) != 0 {
+		N = new(big.Int).Mul(big.NewInt(4), new(big.Int).Div(N, k))
+	}
 
 	return N
-}
-
-func f(y, k *big.Int) *big.Int {
-	return new(big.Int).Exp(Big2, new(big.Int).Mod(y, k), nil)
 }
 
 func tameKangaroo(p, g, b, k *big.Int) (xT, yT *big.Int) {
@@ -133,11 +145,7 @@ func tameKangaroo(p, g, b, k *big.Int) (xT, yT *big.Int) {
 
 // catchKangaroo implements Pollard's kangaroo algorithm.
 func catchKangaroo(p, g, y, a, b *big.Int) (m *big.Int, err error) {
-	newk := math.Sqrt(float64(p.Uint64()))
-	k := new(big.Int).SetInt64(int64(newk))
-	// var k = big.NewInt(100000000)
-	spew.Dump(k)
-
+	k := getK(a, b)
 	xT, yT := tameKangaroo(p, g, b, k)
 
 	xW := Big0
