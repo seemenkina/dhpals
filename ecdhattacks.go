@@ -209,7 +209,7 @@ func findAllPointsOfPrimeOrderOnX128() (points []twistPoint) {
 	// It is known, that both curves contain 2*p+2 points: |E| + |T| = 2*p + 2
 	twistOrder := getTwistOrder(x128.P, x128.N)
 	factors := findSmallTwistFactors(twistOrder)
-
+	spew.Dump(twistOrder, factors)
 	for _, order := range factors {
 		u := findTwistGenerator(order, twistOrder)
 		points = append(points, twistPoint{order: order, point: u})
@@ -255,9 +255,11 @@ func MontgomeryToWeierstrass(u *big.Int) (*big.Int, *big.Int, error) {
 	//yS := []*big.Int{v, new(big.Int).Neg(v)}
 	x := new(big.Int).Add(u, big.NewInt(178))
 	if elliptic.P128().IsOnCurve(x, v) {
+		fmt.Printf("V\n")
 		return x, v, nil
 	} else {
 		if elliptic.P128().IsOnCurve(x, new(big.Int).Neg(v)) {
+			fmt.Printf("-V\n")
 			return x, new(big.Int).Neg(v), nil
 		}
 	}
@@ -380,7 +382,10 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 	}
 	close(chanIn)
 	wg.Wait()
-	spew.Dump(A, N)
+	//for i := 0; i < len(A) && i < len(N); i++ {
+	//	fmt.Printf("A: %d N:%d\n", A[i], N[i])
+	//}
+
 	var tmpA []*big.Int
 	var tmPN []*big.Int
 	tmpA = append(tmpA, A[0])
@@ -395,6 +400,9 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 		}
 	}
 
+	for i := 0; i < len(tmpA) && i < len(tmPN); i++ {
+		fmt.Printf("A: %d N:%d\n", tmpA[i], tmPN[i])
+	}
 	candX, candN, err := crt(tmpA, tmPN)
 	if err != nil {
 		fmt.Print(fmt.Errorf("error: %v", err))
