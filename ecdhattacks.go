@@ -199,6 +199,8 @@ func findAllPointsOfPrimeOrderOnX128() (points []twistPoint) {
 func getK(a, b *big.Int) *big.Int {
 	t0 := new(big.Int).Sub(b, a)
 
+	t0.Sqrt(t0)
+
 	t1 := math.Log2(float64(t0.Int64()))
 	t2 := math.Log2(t1)
 
@@ -213,12 +215,13 @@ func f(u, k *big.Int) *big.Int {
 }
 
 func computeN(k *big.Int) *big.Int {
-
 	N := big.NewInt(0)
 	for i := big.NewInt(0); i.Cmp(k) <= 0; i = new(big.Int).Add(i, BigOne) {
 		N.Add(N, f(i, k))
 	}
-	N.Div(N, new(big.Int).Rsh(k, 2))
+	if new(big.Int).Rsh(k, 2).Cmp(Big0) != 0 {
+		N.Div(N, new(big.Int).Rsh(k, 2))
+	}
 
 	return N
 }
