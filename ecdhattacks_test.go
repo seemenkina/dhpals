@@ -44,28 +44,28 @@ func TestECDHInvalidCurveAttack(t *testing.T) {
 	}
 }
 
-func TestECDHSmallSubgroupAttack(t *testing.T) {
-	p48 := elliptic.P48()
-
-	if !p48.IsOnCurve(p48.Params().Gx, p48.Params().Gy) {
-		t.Fatalf("%s: p48: base point is not on the curve", t.Name())
-	}
-
-	basePointOrder := p48.Params().N
-	ex, ey := p48.ScalarBaseMult(basePointOrder.Bytes())
-
-	if fmt.Sprintf("%d", ex) != "0" || fmt.Sprintf("%d", ey) != "0" {
-		t.Fatalf("%s: sanity check failed", t.Name())
-	}
-
-	oracle, isKeyCorrect, _ := newECDHAttackOracle(p48)
-
-	privateKey := runECDHSmallSubgroupAttack(p48, oracle)
-
-	if !isKeyCorrect(privateKey.Bytes()) {
-		t.Fatalf("%s: wrong private key was found in the small-sugbroup attack on ECDH", t.Name())
-	}
-}
+//func TestECDHSmallSubgroupAttack(t *testing.T) {
+//	p48 := elliptic.P48()
+//
+//	if !p48.IsOnCurve(p48.Params().Gx, p48.Params().Gy) {
+//		t.Fatalf("%s: p48: base point is not on the curve", t.Name())
+//	}
+//
+//	basePointOrder := p48.Params().N
+//	ex, ey := p48.ScalarBaseMult(basePointOrder.Bytes())
+//
+//	if fmt.Sprintf("%d", ex) != "0" || fmt.Sprintf("%d", ey) != "0" {
+//		t.Fatalf("%s: sanity check failed", t.Name())
+//	}
+//
+//	oracle, isKeyCorrect, _ := newECDHAttackOracle(p48)
+//
+//	privateKey := runECDHSmallSubgroupAttack(p48, oracle)
+//
+//	if !isKeyCorrect(privateKey.Bytes()) {
+//		t.Fatalf("%s: wrong private key was found in the small-sugbroup attack on ECDH", t.Name())
+//	}
+//}
 
 func TestCurvesP128AndX128(t *testing.T) {
 	p128 := elliptic.P128()

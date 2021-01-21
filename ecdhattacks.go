@@ -23,16 +23,18 @@ var (
 
 func findSmallFactors(cofactor *big.Int) []*big.Int {
 	var factors []*big.Int
+
 	for i := 3; i < 1<<16; i += 2 {
-		I := new(big.Int).SetInt64(int64(i))
-		z := new(big.Int).Mod(cofactor, I)
-		if z.Cmp(BigZero) == 0 {
-			factors = append(factors, I)
-			for new(big.Int).Mod(cofactor, I).Cmp(BigZero) == 0 {
-				cofactor = new(big.Int).Div(cofactor, I)
+		f := new(big.Int).SetInt64(int64(i))
+		tmp := new(big.Int).Mod(cofactor, f)
+
+		if tmp.Cmp(BigZero) == 0 {
+			factors = append(factors, f)
+			for new(big.Int).Mod(cofactor, f).Cmp(BigZero) == 0 {
+				cofactor = new(big.Int).Div(cofactor, f)
 			}
 		}
-		if I.Cmp(cofactor) == 1 {
+		if f.Cmp(cofactor) == 1 {
 			break
 		}
 	}
@@ -53,6 +55,13 @@ func findGenerator(order *big.Int, curve elliptic.Curve) (*big.Int, *big.Int) {
 	}
 }
 
+func bruteHashICA(curve elliptic.Curve, x, y, posibleKey *big.Int) []byte {
+	cX, cY := curve.ScalarMult(x, y, posibleKey.Bytes())
+	cur := append(cX.Bytes(), cY.Bytes()...)
+	currentMsg := mixKey(cur)
+	return currentMsg
+}
+
 func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) {
 
 	badCurve := []elliptic.Curve{elliptic.P128V1(), elliptic.P128V2(), elliptic.P128V3()}
@@ -66,22 +75,20 @@ func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) 
 
 			msg := ecdh(x, y)
 
-			for a := BigOne; a.Cmp(order) <= 0; a = new(big.Int).Add(a, BigOne) {
-				cX, cY := curve.ScalarMult(x, y, a.Bytes())
-				cur := append(cX.Bytes(), cY.Bytes()...)
-				k := mixKey(cur)
+			for possibleKey := BigOne; possibleKey.Cmp(order) <= 0; possibleKey = new(big.Int).Add(possibleKey, BigOne) {
+				currentMsg := bruteHashICA(curve, x, y, possibleKey)
 
-				if bytes.Equal(msg, k) {
+				if bytes.Equal(msg, currentMsg) {
 					flag := true
 					for i := 0; i < len(A) && i < len(N); i++ {
-						if A[i].Cmp(a) == 0 && N[i].Cmp(order) == 0 {
+						if A[i].Cmp(possibleKey) == 0 && N[i].Cmp(order) == 0 {
 							flag = false
+							break
 						}
 					}
 					if flag {
-						A = append(A, a)
+						A = append(A, possibleKey)
 						N = append(N, order)
-						break
 					}
 				}
 
@@ -91,7 +98,21 @@ func runECDHInvalidCurveAttack(ecdh func(x, y *big.Int) []byte) (priv *big.Int) 
 
 	}
 
-	x, _, err := crt(A, N)
+	var tmpA []*big.Int
+	var tmPN []*big.Int
+	tmpA = append(tmpA, A[0])
+	tmPN = append(tmPN, N[0])
+
+	for i := 1; i < len(N); i++ {
+		if N[i-1].Cmp(N[i]) == 0 {
+			continue
+		} else {
+			tmpA = append(tmpA, A[i])
+			tmPN = append(tmPN, N[i])
+		}
+	}
+
+	x, _, err := crt(tmpA, tmPN)
 	if err != nil {
 		println(err)
 		return nil
@@ -128,7 +149,7 @@ func findSmallTwistFactors(r *big.Int) []*big.Int {
 			break
 		}
 	}
-	//spew.Dump(factors)
+
 	return factors
 }
 
