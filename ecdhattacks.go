@@ -313,11 +313,12 @@ func catchKangarooOnCurve(curve elliptic.Curve, bx, by, x, y, a, b *big.Int) (m 
 	return nil, fmt.Errorf("no result was found")
 }
 
-func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.Int, privateKeyOracle func(*big.Int) *big.Int) (priv *big.Int) {
+func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.Int, privateKeyOracle func(*big.Int) *big.Int) (priv []*big.Int) {
 
 	mrw := sync.RWMutex{}
 	var A, N []*big.Int
 	points := findAllPointsOfPrimeOrderOnX128()
+	twistOrder := getTwistOrder(x128.P, x128.N)
 
 	type dataIn struct {
 		cancel      context.CancelFunc
@@ -382,66 +383,104 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 	}
 	close(chanIn)
 	wg.Wait()
-	//for i := 0; i < len(A) && i < len(N); i++ {
-	//	fmt.Printf("A: %d N:%d\n", A[i], N[i])
-	//}
+	for i := 0; i < len(A) && i < len(N); i++ {
+		fmt.Printf("A: %d N:%d\n", A[i], N[i])
+	}
 
 	var tmpA []*big.Int
 	var tmPN []*big.Int
 	tmpA = append(tmpA, A[0])
-	tmPN = append(tmPN, N[0])
-
+	tmPN = append(tmPN, new(big.Int).Mul(N[0], big.NewInt(2)))
+	var candN *big.Int
+	candN = new(big.Int).SetInt64(0)
+	candN.Add(candN, N[0])
 	for i := 1; i < len(N); i++ {
 		if N[i-1].Cmp(N[i]) == 0 {
 			continue
 		} else {
 			tmpA = append(tmpA, A[i])
 			tmPN = append(tmPN, N[i])
+			candN.Add(candN, N[i])
 		}
 	}
 
 	for i := 0; i < len(tmpA) && i < len(tmPN); i++ {
-		fmt.Printf("A: %d N:%d\n", tmpA[i], tmPN[i])
-	}
-	candX, candN, err := crt(tmpA, tmPN)
-	if err != nil {
-		fmt.Print(fmt.Errorf("error: %v", err))
-		return nil
-	}
-	fmt.Printf("x: %d\nn: %d\n", candX, candN)
-
-	curve := elliptic.P128()
-
-	baseNew := x128.ScalarBaseMult(candN.Bytes())
-	baseNewx, baseNewy, err := MontgomeryToWeierstrass(baseNew)
-	if err != nil {
-		fmt.Print(fmt.Errorf("error: %v", err))
-		return nil
-	}
-	fmt.Printf("xBase: %d\nyBase: %d\n", baseNewx, baseNewy)
-
-	bobPubKey := getPublicKey()
-	xNew, yNew, err := MontgomeryToWeierstrass(bobPubKey)
-	if err != nil {
-		fmt.Print(fmt.Errorf("error: %v", err))
-		return nil
-	}
-	baseNx, baseNy := curve.ScalarBaseMult(new(big.Int).Neg(candX).Bytes())
-	xNew, yNew = curve.Add(xNew, yNew, baseNx, baseNy)
-	fmt.Printf("xNew: %d\nyNew: %d\n", xNew, yNew)
-
-	a := big.NewInt(0)
-	b := new(big.Int).Sub(x128.Q, big.NewInt(1))
-	b.Div(b, candN)
-	fmt.Printf("a: %d\nb: %d\n", a, b)
-
-	m, err := catchKangarooOnCurve(curve, baseNx, baseNy, xNew, yNew, a, b)
-	if err != nil {
-		fmt.Print(fmt.Errorf("error: %v", err))
-		return nil
+		fmt.Printf("tmpA: %d tmpN:%d\n", tmpA[i], tmPN[i])
 	}
 
-	priv = new(big.Int).Add(candX, new(big.Int).Mul(m, candN))
+	var candXs []*big.Int
+
+	p := 1 << 7
+	gen := findTwistGenerator(candN, twistOrder)
+	msg := ecdh(gen)
+	for i := 0; i < p; i++ {
+		var bufA []*big.Int
+		for j := 0; j < 7; j++ {
+			if (i>>j)&1 == 1 {
+				bufA = append(bufA, new(big.Int).Sub(tmPN[j], tmpA[j]))
+			} else {
+				bufA = append(bufA, tmpA[j])
+			}
+		}
+		//fmt.Printf("A: %v\n", bufA)
+		//TODO: make condition for candX
+		candX, _, err := crt(bufA, tmPN)
+		if err != nil {
+			fmt.Print(fmt.Errorf("error: %v", err))
+		}
+		fmt.Printf("X: %d\n", candX)
+		curMsg := bruteHash(twistPoint{
+			order: candN,
+			point: gen,
+		}, candX)
+
+		if bytes.Equal(curMsg, msg) {
+			candXs = append(candXs, candX)
+		}
+
+	}
+
+	spew.Dump(candXs)
+	//if candN.Cmp(twistOrder) >= 0 {
+	//	return candXs
+	//}
+
+	var m *big.Int
+	for _, candX := range candXs {
+		curve := elliptic.P128()
+
+		baseNew := x128.ScalarBaseMult(candN.Bytes())
+		baseNewx, baseNewy, err := MontgomeryToWeierstrass(baseNew)
+		if err != nil {
+			fmt.Print(fmt.Errorf("error: %v", err))
+			return nil
+		}
+		fmt.Printf("xBase: %d\nyBase: %d\n", baseNewx, baseNewy)
+
+		bobPubKey := getPublicKey()
+		xNew, yNew, err := MontgomeryToWeierstrass(bobPubKey)
+		if err != nil {
+			fmt.Print(fmt.Errorf("error: %v", err))
+			return nil
+		}
+
+		baseNx, baseNy := curve.ScalarBaseMult(new(big.Int).Sub(twistOrder, candX).Bytes())
+		xNew, yNew = curve.Add(xNew, yNew, baseNx, baseNy)
+		fmt.Printf("xNew: %d\nyNew: %d\n", xNew, yNew)
+
+		a := big.NewInt(0)
+		b := new(big.Int).Sub(x128.Q, big.NewInt(1))
+		b.Div(b, candN)
+		fmt.Printf("a: %d\nb: %d\n", a, b)
+
+		m, err = catchKangarooOnCurve(curve, baseNx, baseNy, xNew, yNew, a, b)
+		if err != nil {
+			fmt.Print(fmt.Errorf("error: %v", err))
+		} else {
+			priv = append(priv, new(big.Int).Add(candX, new(big.Int).Mul(m, candN)))
+		}
+	}
+
 	return priv
 }
 

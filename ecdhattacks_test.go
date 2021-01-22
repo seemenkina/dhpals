@@ -134,11 +134,14 @@ func TestTwistAttack(t *testing.T) {
 
 	privateKey := runECDHTwistAttack(ecdh, getPublic, vulnOracle)
 
-	if !isKeyCorrect(privateKey.Bytes()) {
-		t.Fatalf("%s: wrong private key was found in the sugbroup attack", t.Name())
+	for _, pr := range privateKey {
+		if isKeyCorrect(pr.Bytes()) {
+			fmt.Print(privateKey)
+		}
 	}
 
-	fmt.Print(privateKey)
+	t.Fatalf("%s: wrong private key was found in the sugbroup attack", t.Name())
+
 }
 
 func Test_findTwistGenerator(t *testing.T) {
