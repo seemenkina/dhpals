@@ -255,11 +255,9 @@ func MontgomeryToWeierstrass(u *big.Int) (*big.Int, *big.Int, error) {
 	//yS := []*big.Int{v, new(big.Int).Neg(v)}
 	x := new(big.Int).Add(u, big.NewInt(178))
 	if elliptic.P128().IsOnCurve(x, v) {
-		fmt.Printf("V\n")
 		return x, v, nil
 	} else {
 		if elliptic.P128().IsOnCurve(x, new(big.Int).Neg(v)) {
-			fmt.Printf("-V\n")
 			return x, new(big.Int).Neg(v), nil
 		}
 	}
@@ -310,7 +308,7 @@ func catchKangarooOnCurve(curve elliptic.Curve, bx, by, x, y, a, b *big.Int) (m 
 		}
 	}
 
-	return nil, fmt.Errorf("no result was found")
+	return nil, fmt.Errorf("no result was found\n")
 }
 
 func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.Int, privateKeyOracle func(*big.Int) *big.Int) (priv []*big.Int) {
@@ -388,27 +386,30 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 	}
 
 	var tmpA []*big.Int
-	var tmPN []*big.Int
+	var tmpN []*big.Int
 	tmpA = append(tmpA, A[0])
-	tmPN = append(tmPN, new(big.Int).Mul(N[0], big.NewInt(2)))
+	tmpN = append(tmpN, new(big.Int).Mul(N[0], big.NewInt(2)))
 	var candN *big.Int
-	candN = new(big.Int).SetInt64(0)
-	candN.Add(candN, N[0])
+	candN = new(big.Int).Set(tmpN[0])
+
 	for i := 1; i < len(N); i++ {
 		if N[i-1].Cmp(N[i]) == 0 {
 			continue
 		} else {
 			tmpA = append(tmpA, A[i])
-			tmPN = append(tmPN, N[i])
-			candN.Add(candN, N[i])
+			tmpN = append(tmpN, N[i])
+			candN.Mul(candN, N[i])
 		}
 	}
 
-	for i := 0; i < len(tmpA) && i < len(tmPN); i++ {
-		fmt.Printf("tmpA: %d tmpN:%d\n", tmpA[i], tmPN[i])
+	for i := 0; i < len(tmpA) && i < len(tmpN); i++ {
+		fmt.Printf("tmpA: %d tmpN:%d\n", tmpA[i], tmpN[i])
 	}
+	fmt.Printf("candN: %d\n", candN)
 
 	var candXs []*big.Int
+	//candNDiv2 := new(big.Int).Set(new(big.Int).Div(candN, big.NewInt(2)))
+	//fmt.Printf("candNDiv2: %d\n", candNDiv2)
 
 	p := 1 << 7
 	gen := findTwistGenerator(candN, twistOrder)
@@ -417,18 +418,27 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 		var bufA []*big.Int
 		for j := 0; j < 7; j++ {
 			if (i>>j)&1 == 1 {
-				bufA = append(bufA, new(big.Int).Sub(tmPN[j], tmpA[j]))
+				bufA = append(bufA, new(big.Int).Sub(tmpN[j], tmpA[j]))
 			} else {
 				bufA = append(bufA, tmpA[j])
 			}
 		}
 		//fmt.Printf("A: %v\n", bufA)
 		//TODO: make condition for candX
-		candX, _, err := crt(bufA, tmPN)
+		candX, _, err := crt(bufA, tmpN)
 		if err != nil {
 			fmt.Print(fmt.Errorf("error: %v", err))
 		}
 		fmt.Printf("X: %d\n", candX)
+
+		//pkDivQ := privateKeyOracle(candN)
+		//pkDivQ2 := privateKeyOracle(candNDiv2)
+		//if pkDivQ.Cmp(candX) == 0 || pkDivQ2.Cmp(candX) == 0 {
+		//	candXs = append(candXs, candX)
+		//}
+		//if pkDivQ.BitLen() == candX.BitLen() ||  pkDivQ2.BitLen() == candX.BitLen(){
+		//	candXs = append(candXs, candX)
+		//}
 		curMsg := bruteHash(twistPoint{
 			order: candN,
 			point: gen,
@@ -437,16 +447,27 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 		if bytes.Equal(curMsg, msg) {
 			candXs = append(candXs, candX)
 		}
-
+		//candXs = append(candXs, candX)
 	}
 
 	spew.Dump(candXs)
-	//if candN.Cmp(twistOrder) >= 0 {
-	//	return candXs
-	//}
+	if candN.Cmp(twistOrder) >= 0 {
+		return candXs
+	}
+
+	var tmpCandXs []*big.Int
+	tmpCandXs = append(tmpCandXs, candXs[0])
+	for i := 1; i < len(candXs); i++ {
+		if candXs[i-1].Cmp(candXs[i]) == 0 {
+			continue
+		} else {
+			tmpCandXs = append(tmpCandXs, candXs[i])
+		}
+	}
+	spew.Dump(tmpCandXs)
 
 	var m *big.Int
-	for _, candX := range candXs {
+	for _, candX := range tmpCandXs {
 		curve := elliptic.P128()
 
 		baseNew := x128.ScalarBaseMult(candN.Bytes())
@@ -469,7 +490,7 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 		fmt.Printf("xNew: %d\nyNew: %d\n", xNew, yNew)
 
 		a := big.NewInt(0)
-		b := new(big.Int).Sub(x128.Q, big.NewInt(1))
+		b := new(big.Int).Sub(twistOrder, big.NewInt(1))
 		b.Div(b, candN)
 		fmt.Printf("a: %d\nb: %d\n", a, b)
 
