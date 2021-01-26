@@ -244,7 +244,7 @@ func computeN(k *big.Int) *big.Int {
 		N.Div(N, new(big.Int).Rsh(k, 2))
 	}
 
-	return N
+	return N.Mul(N, big.NewInt(6))
 }
 
 func MontgomeryToWeierstrass(u *big.Int) (*big.Int, *big.Int, error) {
@@ -252,15 +252,12 @@ func MontgomeryToWeierstrass(u *big.Int) (*big.Int, *big.Int, error) {
 	if v == nil {
 		return nil, nil, fmt.Errorf("no v coordinate on curve x128 for u coordinate")
 	}
-	//yS := []*big.Int{v, new(big.Int).Neg(v)}
+
 	x := new(big.Int).Add(u, big.NewInt(178))
 	if elliptic.P128().IsOnCurve(x, v) {
 		return x, v, nil
-	} else {
-		if elliptic.P128().IsOnCurve(x, new(big.Int).Neg(v)) {
-			return x, new(big.Int).Neg(v), nil
-		}
 	}
+
 	return nil, nil, fmt.Errorf("x, v are not on P128 curve")
 }
 
@@ -350,8 +347,10 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 					if flag {
 						//fmt.Printf("point: %d, order %d\n", data.possibleKey, data.point.order)
 						mrw.Lock()
-						A = append(A, data.possibleKey)
-						N = append(N, data.point.order)
+						if ifDuplicate(A, N, data.possibleKey, data.point.order) {
+							A = append(A, data.possibleKey)
+							N = append(N, data.point.order)
+						}
 						mrw.Unlock()
 						data.cancel()
 					}
@@ -364,7 +363,7 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 	for _, point := range points {
 		msg := ecdh(point.point)
 		ctx, cancel := context.WithCancel(context.Background())
-		for posKey := BigOne; posKey.Cmp(point.order) <= 0; posKey = new(big.Int).Add(posKey, BigOne) {
+		for posKey := big.NewInt(1); posKey.Cmp(point.order) <= 0; posKey = new(big.Int).Add(posKey, big.NewInt(1)) {
 			select {
 			case <-ctx.Done():
 				break
@@ -381,132 +380,142 @@ func runECDHTwistAttack(ecdh func(x *big.Int) []byte, getPublicKey func() *big.I
 	}
 	close(chanIn)
 	wg.Wait()
-	for i := 0; i < len(A) && i < len(N); i++ {
-		fmt.Printf("A: %d N:%d\n", A[i], N[i])
+
+	//	N[0].Mul(N[0], big.NewInt(2))
+
+	candN := new(big.Int).SetInt64(1)
+	for i := 0; i < len(N); i++ {
+		candN.Mul(candN, N[i])
 	}
 
-	var tmpA []*big.Int
-	var tmpN []*big.Int
-	tmpA = append(tmpA, A[0])
-	tmpN = append(tmpN, new(big.Int).Mul(N[0], big.NewInt(2)))
-	var candN *big.Int
-	candN = new(big.Int).Set(tmpN[0])
-
-	for i := 1; i < len(N); i++ {
-		if N[i-1].Cmp(N[i]) == 0 {
-			continue
-		} else {
-			tmpA = append(tmpA, A[i])
-			tmpN = append(tmpN, N[i])
-			candN.Mul(candN, N[i])
-		}
-	}
-
-	for i := 0; i < len(tmpA) && i < len(tmpN); i++ {
-		fmt.Printf("tmpA: %d tmpN:%d\n", tmpA[i], tmpN[i])
-	}
+	//for i := 0; i < len(A) && i < len(N); i++ {
+	//	fmt.Printf("A: %d tmpN: %d\n", A[i], N[i])
+	//}
 	fmt.Printf("candN: %d\n", candN)
 
 	var candXs []*big.Int
-	//candNDiv2 := new(big.Int).Set(new(big.Int).Div(candN, big.NewInt(2)))
-	//fmt.Printf("candNDiv2: %d\n", candNDiv2)
 
-	p := 1 << 7
+	p := 1 << len(N)
+	lenM := len(N)
 	gen := findTwistGenerator(candN, twistOrder)
 	msg := ecdh(gen)
+
+	bufA := make([]*big.Int, len(A))
 	for i := 0; i < p; i++ {
-		var bufA []*big.Int
-		for j := 0; j < 7; j++ {
+
+		for j := 0; j < lenM; j++ {
 			if (i>>j)&1 == 1 {
-				bufA = append(bufA, new(big.Int).Sub(tmpN[j], tmpA[j]))
+				bufA[j] = new(big.Int).Sub(N[j], A[j])
 			} else {
-				bufA = append(bufA, tmpA[j])
+				bufA[j] = new(big.Int).Set(A[j])
 			}
 		}
 		//fmt.Printf("A: %v\n", bufA)
-		//TODO: make condition for candX
-		candX, _, err := crt(bufA, tmpN)
+
+		candX, r, err := crt(bufA, N)
 		if err != nil {
 			fmt.Print(fmt.Errorf("error: %v", err))
 		}
-		fmt.Printf("X: %d\n", candX)
+		//fmt.Printf("X: %d\n", candX)
 
-		//pkDivQ := privateKeyOracle(candN)
-		//pkDivQ2 := privateKeyOracle(candNDiv2)
-		//if pkDivQ.Cmp(candX) == 0 || pkDivQ2.Cmp(candX) == 0 {
-		//	candXs = append(candXs, candX)
-		//}
-		//if pkDivQ.BitLen() == candX.BitLen() ||  pkDivQ2.BitLen() == candX.BitLen(){
-		//	candXs = append(candXs, candX)
-		//}
 		curMsg := bruteHash(twistPoint{
-			order: candN,
+			order: r,
 			point: gen,
 		}, candX)
 
-		if bytes.Equal(curMsg, msg) {
+		if bytes.Equal(curMsg, msg) && ifDuplicate(candXs, nil, candX, nil) {
 			candXs = append(candXs, candX)
 		}
-		//candXs = append(candXs, candX)
+
 	}
 
 	spew.Dump(candXs)
-	if candN.Cmp(twistOrder) >= 0 {
-		return candXs
-	}
-
-	var tmpCandXs []*big.Int
-	tmpCandXs = append(tmpCandXs, candXs[0])
-	for i := 1; i < len(candXs); i++ {
-		if candXs[i-1].Cmp(candXs[i]) == 0 {
-			continue
-		} else {
-			tmpCandXs = append(tmpCandXs, candXs[i])
-		}
-	}
-	spew.Dump(tmpCandXs)
 
 	var m *big.Int
-	for _, candX := range tmpCandXs {
-		curve := elliptic.P128()
+	curve := elliptic.P128()
 
-		baseNew := x128.ScalarBaseMult(candN.Bytes())
-		baseNewx, baseNewy, err := MontgomeryToWeierstrass(baseNew)
-		if err != nil {
-			fmt.Print(fmt.Errorf("error: %v", err))
-			return nil
-		}
-		fmt.Printf("xBase: %d\nyBase: %d\n", baseNewx, baseNewy)
-
-		bobPubKey := getPublicKey()
-		xNew, yNew, err := MontgomeryToWeierstrass(bobPubKey)
-		if err != nil {
-			fmt.Print(fmt.Errorf("error: %v", err))
-			return nil
-		}
-
-		baseNx, baseNy := curve.ScalarBaseMult(new(big.Int).Sub(twistOrder, candX).Bytes())
-		xNew, yNew = curve.Add(xNew, yNew, baseNx, baseNy)
-		fmt.Printf("xNew: %d\nyNew: %d\n", xNew, yNew)
-
-		a := big.NewInt(0)
-		b := new(big.Int).Sub(twistOrder, big.NewInt(1))
-		b.Div(b, candN)
-		fmt.Printf("a: %d\nb: %d\n", a, b)
-
-		m, err = catchKangarooOnCurve(curve, baseNx, baseNy, xNew, yNew, a, b)
-		if err != nil {
-			fmt.Print(fmt.Errorf("error: %v", err))
-		} else {
-			priv = append(priv, new(big.Int).Add(candX, new(big.Int).Mul(m, candN)))
-		}
+	bobPubKey := getPublicKey()
+	xNew, yNew, err := MontgomeryToWeierstrass(bobPubKey)
+	if err != nil {
+		fmt.Print(fmt.Errorf("error: %v", err))
+		return nil
 	}
 
-	return priv
+	a := big.NewInt(0)
+	b := new(big.Int).Sub(curve.Params().N, big.NewInt(1))
+	b.Div(b, candN)
+	fmt.Printf("a: %d\nb: %d\n", a, b)
+
+	baseNewx, baseNewy := curve.ScalarBaseMult(candN.Bytes())
+	fmt.Printf("xBase: %d\nyBase: %d\n", baseNewx, baseNewy)
+
+	ch := make(chan *big.Int, len(candXs)*2)
+	for _, candX := range candXs {
+
+		wg.Add(1)
+		go func(cand *big.Int) {
+			defer wg.Done()
+
+			baseNx, baseNy := curve.ScalarBaseMult(cand.Bytes())
+			baseNx, baseNy = elliptic.Inverse(curve, baseNx, baseNy)
+			xNew, yNew = curve.Add(xNew, yNew, baseNx, baseNy)
+
+			m, err = catchKangarooOnCurve(curve, baseNewx, baseNewy, xNew, yNew, a, b)
+			if err != nil {
+				fmt.Print(fmt.Errorf("error1: %v", err))
+				ch <- nil
+				return
+			}
+
+			x := new(big.Int).Mul(m, candN)
+			x.Add(x, cand)
+			fmt.Printf("x: %d\n", x)
+			ch <- x
+
+			m, err = catchKangarooOnCurve(curve, baseNewx, baseNewy, xNew, new(big.Int).Sub(curve.Params().P, yNew), a, b)
+			if err != nil {
+				fmt.Print(fmt.Errorf("error1: %v", err))
+				ch <- nil
+				return
+			}
+
+			x = new(big.Int).Mul(m, candN)
+			x.Add(x, cand)
+			fmt.Printf("x: %d\n", x)
+			ch <- x
+
+		}(candX)
+
+	}
+
+	wg.Wait()
+
+	for len(ch) > 0 {
+		priv = append(priv, <-ch)
+	}
+
+	close(ch)
+
+	return
 }
 
 func bruteHash(point twistPoint, possibleKey *big.Int) []byte {
 	currentU := x128.ScalarMult(point.point, possibleKey.Bytes())
 	currentMsg := mixKey(currentU.Bytes())
 	return currentMsg
+}
+
+func ifDuplicate(A, N []*big.Int, a, n *big.Int) bool {
+
+	for i := 0; i < len(N); i++ {
+		if N[i].Cmp(n) == 0 || A[i].Cmp(a) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+type canCh struct {
+	cand *big.Int
+	yNew *big.Int
 }

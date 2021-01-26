@@ -135,7 +135,7 @@ func TestTwistAttack(t *testing.T) {
 	privateKey := runECDHTwistAttack(ecdh, getPublic, vulnOracle)
 
 	for _, pr := range privateKey {
-		if isKeyCorrect(pr.Bytes()) {
+		if pr != nil && isKeyCorrect(pr.Bytes()) {
 			fmt.Print(privateKey)
 		}
 	}
