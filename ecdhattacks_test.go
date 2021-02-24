@@ -44,28 +44,28 @@ func TestECDHInvalidCurveAttack(t *testing.T) {
 	}
 }
 
-func TestECDHSmallSubgroupAttack(t *testing.T) {
-	p48 := elliptic.P48()
-
-	if !p48.IsOnCurve(p48.Params().Gx, p48.Params().Gy) {
-		t.Fatalf("%s: p48: base point is not on the curve", t.Name())
-	}
-
-	basePointOrder := p48.Params().N
-	ex, ey := p48.ScalarBaseMult(basePointOrder.Bytes())
-
-	if fmt.Sprintf("%d", ex) != "0" || fmt.Sprintf("%d", ey) != "0" {
-		t.Fatalf("%s: sanity check failed", t.Name())
-	}
-
-	oracle, isKeyCorrect, _ := newECDHAttackOracle(p48)
-
-	privateKey := runECDHSmallSubgroupAttack(p48, oracle)
-
-	if !isKeyCorrect(privateKey.Bytes()) {
-		t.Fatalf("%s: wrong private key was found in the small-sugbroup attack on ECDH", t.Name())
-	}
-}
+//func TestECDHSmallSubgroupAttack(t *testing.T) {
+//	p48 := elliptic.P48()
+//
+//	if !p48.IsOnCurve(p48.Params().Gx, p48.Params().Gy) {
+//		t.Fatalf("%s: p48: base point is not on the curve", t.Name())
+//	}
+//
+//	basePointOrder := p48.Params().N
+//	ex, ey := p48.ScalarBaseMult(basePointOrder.Bytes())
+//
+//	if fmt.Sprintf("%d", ex) != "0" || fmt.Sprintf("%d", ey) != "0" {
+//		t.Fatalf("%s: sanity check failed", t.Name())
+//	}
+//
+//	oracle, isKeyCorrect, _ := newECDHAttackOracle(p48)
+//
+//	privateKey := runECDHSmallSubgroupAttack(p48, oracle)
+//
+//	if !isKeyCorrect(privateKey.Bytes()) {
+//		t.Fatalf("%s: wrong private key was found in the small-sugbroup attack on ECDH", t.Name())
+//	}
+//}
 
 func TestCurvesP128AndX128(t *testing.T) {
 	p128 := elliptic.P128()
@@ -134,9 +134,46 @@ func TestTwistAttack(t *testing.T) {
 
 	privateKey := runECDHTwistAttack(ecdh, getPublic, vulnOracle)
 
-	if !isKeyCorrect(privateKey.Bytes()) {
-		t.Fatalf("%s: wrong private key was found in the sugbroup attack", t.Name())
+	for _, pr := range privateKey {
+		if pr != nil && isKeyCorrect(pr.Bytes()) {
+			fmt.Print(privateKey)
+		}
 	}
 
-	fmt.Print(privateKey)
+	t.Fatalf("%s: wrong private key was found in the sugbroup attack", t.Name())
+
+}
+
+func Test_findTwistGenerator(t *testing.T) {
+	type args struct {
+		order *big.Int
+		p     *big.Int
+		q     *big.Int
+	}
+	tests := []struct {
+		name string
+		args args
+		// want *big.Int
+	}{
+		{"x128-N", args{
+			p: x128.P,
+			q: x128.N,
+		}},
+		{"x128-Q", args{
+			p: x128.P,
+			q: x128.Q,
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := getTwistOrder(tt.args.p, tt.args.q)
+			t.Logf("getTwistOrder() = %v", r)
+			factors := findSmallTwistFactors(r)
+			t.Logf("findSmallTwistFactors() = %v", factors)
+			for _, f := range factors {
+				got := findTwistGenerator(f, r)
+				t.Logf("findTwistGenerator() = %v, of order %v", got, f)
+			}
+		})
+	}
 }

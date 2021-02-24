@@ -8,6 +8,11 @@ import (
 	"sync"
 )
 
+var BigZero = big.NewInt(0)
+var BigOne = big.NewInt(1)
+var BigTwo = big.NewInt(2)
+var BigThree = big.NewInt(3)
+
 // A Curve represents a short-form Weierstrass curve y^2 = x^3 - a*x + b.
 type Curve interface {
 	// Params returns the parameters for the curve.
@@ -41,26 +46,106 @@ func (curve *CurveParams) Params() *CurveParams {
 	return curve
 }
 
+// polynomial returns x³ + ax + b.
+func (curve *CurveParams) polynomial(x *big.Int) *big.Int {
+	x3 := new(big.Int).Mul(x, x)
+	x3.Mul(x3, x)
+
+	aX := new(big.Int).Mul(curve.A, x)
+
+	x3.Add(x3, aX)
+	x3.Add(x3, curve.B)
+	x3.Mod(x3, curve.P)
+
+	return x3
+}
+
 func (curve *CurveParams) IsOnCurve(x, y *big.Int) bool {
 	// y^2 = x^3 - a*x + b
-	panic("not implemented")
-	return false
+	newY := new(big.Int).Mul(y, y)
+	newY.Mod(newY, curve.P)
+	return curve.polynomial(x).Cmp(newY) == 0
 }
 
 // Add takes two points (x1, y1) and (x2, y2) and returns their sum.
 // It is assumed that "point at infinity" is (0, 0).
 func (curve *CurveParams) Add(x1, y1, x2, y2 *big.Int) (x, y *big.Int) {
-	panic("not implemented")
-	return nil, nil
+
+	m := new(big.Int)
+
+	if x1.Cmp(BigZero) == 0 && y1.Cmp(BigZero) == 0 {
+		return x2, y2
+	}
+
+	if x2.Cmp(BigZero) == 0 && y2.Cmp(BigZero) == 0 {
+		return x1, y1
+	}
+
+	ix, iy := Inverse(curve, x2, y2)
+	if x1.Cmp(ix) == 0 && y1.Cmp(iy) == 0 {
+		return BigZero, BigZero
+	}
+
+	if x1.Cmp(x2) == 0 && y1.Cmp(y2) == 0 {
+		// m := (3*x1^2 + a) / 2*y1
+		divisor := new(big.Int).Mul(BigThree, new(big.Int).Mul(x1, x1))
+		divisor.Mod(divisor, curve.P)
+		divisor.Add(divisor, curve.A)
+
+		dividend := new(big.Int).Mul(BigTwo, y1)
+		dividend.ModInverse(dividend, curve.P)
+
+		m = new(big.Int).Mul(divisor, dividend)
+		m.Mod(m, curve.P)
+
+	} else {
+		// m := (y2 - y1) / (x2 - x1)
+		divisor := new(big.Int).Sub(y2, y1)
+		dividend := new(big.Int).Sub(x2, x1)
+		dividend.ModInverse(dividend, curve.P)
+
+		m = new(big.Int).Mul(divisor, dividend)
+		m.Mod(m, curve.P)
+	}
+	// x3 := m^2 - x1 - x2
+	x3 := new(big.Int).Sub(new(big.Int).Sub(new(big.Int).Mul(m, m), x1), x2)
+	x3.Mod(x3, curve.P)
+
+	// y3 := m*(x1 - x3) - y1
+	subX := new(big.Int).Sub(x1, x3)
+	y3 := new(big.Int).Mul(m, subX)
+	y3.Sub(y3, y1)
+	y3.Mod(y3, curve.P)
+
+	return x3, y3
 }
 
 func (curve *CurveParams) Double(x1, y1 *big.Int) (x, y *big.Int) {
 	return curve.Add(x1, y1, x1, y1)
 }
 
+func isOdd(i *big.Int) bool {
+	repr := i.Bytes()
+	return repr[len(repr)-1]&0x01 != 0
+}
+
 func (curve *CurveParams) ScalarMult(xIn, yIn *big.Int, k []byte) (x, y *big.Int) {
-	panic("not implemented")
-	return nil, nil
+	n := new(big.Int).SetBytes(k)
+	x, y = BigZero, BigZero
+
+	if len(k) == 0 {
+		return x, y
+	}
+
+	for n.Cmp(BigZero) > 0 {
+		if isOdd(n) {
+			x, y = curve.Add(x, y, xIn, yIn)
+		}
+		xIn, yIn = curve.Double(xIn, yIn)
+		n.Rsh(n, 1)
+	}
+
+	return x, y
 }
 
 func (curve *CurveParams) ScalarBaseMult(k []byte) (x, y *big.Int) {
@@ -99,20 +184,26 @@ func Inverse(curve Curve, x, y *big.Int) (ix *big.Int, iy *big.Int) {
 }
 
 func GeneratePoint(curve Curve) (*big.Int, *big.Int) {
-	x, err := rand.Int(rand.Reader, curve.Params().P)
-	if err != nil {
-		panic(err)
+	for {
+		x, err := rand.Int(rand.Reader, curve.Params().P)
+
+		if err != nil {
+			panic(err)
+		}
+
+		x3 := new(big.Int).Mul(x, x)
+		x3.Mul(x3, x)
+
+		ax := new(big.Int).Mul(curve.Params().A, x)
+		x3.Add(x3, ax)
+		x3.Add(x3, curve.Params().B)
+		x3.Mod(x3, curve.Params().P)
+
+		y := new(big.Int).ModSqrt(x3, curve.Params().P)
+		if y != nil {
+			return x, y
+		}
 	}
-
-	x3 := new(big.Int).Mul(x, x)
-	x3.Mul(x3, x)
-
-	ax := new(big.Int).Mul(curve.Params().A, x)
-	x3.Sub(x3, ax)
-	x3.Add(x3, curve.Params().B)
-	x3.Mod(x3, curve.Params().P)
-
-	return x, new(big.Int).ModSqrt(x3, curve.Params().P)
 }
 
 // Marshal converts a point into the uncompressed form specified in section 4.3.6 of ANSI X9.62.
@@ -176,7 +267,7 @@ func initP256() {
 	p256.P, _ = new(big.Int).SetString("115792089210356248762697446949407573530086143415290314195533631308867097853951", 10)
 	p256.N, _ = new(big.Int).SetString("115792089210356248762697446949407573529996955224135760342422259061068512044369", 10)
 	p256.B, _ = new(big.Int).SetString("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b", 16)
-	p256.A, _ = new(big.Int).SetString("3", 10)
+	p256.A, _ = new(big.Int).SetString("-3", 10)
 	p256.Gx, _ = new(big.Int).SetString("6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296", 16)
 	p256.Gy, _ = new(big.Int).SetString("4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5", 16)
 	p256.BitSize = 127
@@ -188,7 +279,7 @@ func initP224() {
 	p224.P, _ = new(big.Int).SetString("26959946667150639794667015087019630673557916260026308143510066298881", 10)
 	p224.N, _ = new(big.Int).SetString("26959946667150639794667015087019625940457807714424391721682722368061", 10)
 	p224.B, _ = new(big.Int).SetString("b4050a850c04b3abf54132565044b0b7d7bfd8ba270b39432355ffb4", 16)
-	p224.A, _ = new(big.Int).SetString("3", 10)
+	p224.A, _ = new(big.Int).SetString("-3", 10)
 	p224.Gx, _ = new(big.Int).SetString("b70e0cbd6bb4bf7f321390b94a03c1d356c21122343280d6115c1d21", 16)
 	p224.Gy, _ = new(big.Int).SetString("bd376388b5f723fb4c22dfe6cd4375a05a07476444d5819985007e34", 16)
 	p224.BitSize = 224
@@ -198,7 +289,7 @@ func initP4() {
 	p4 = &CurveParams{Name: "P-4"}
 	p4.P, _ = new(big.Int).SetString("11", 10)
 	p4.B, _ = new(big.Int).SetString("1", 10)
-	p4.A, _ = new(big.Int).SetString("3", 10)
+	p4.A, _ = new(big.Int).SetString("-3", 10)
 	p4.BitSize = 4
 }
 
@@ -207,7 +298,7 @@ func initP128() {
 	p128.P, _ = new(big.Int).SetString("233970423115425145524320034830162017933", 10)
 	p128.N, _ = new(big.Int).SetString("29246302889428143187362802287225875743", 10)
 	p128.B, _ = new(big.Int).SetString("11279326", 10)
-	p128.A, _ = new(big.Int).SetString("95051", 10)
+	p128.A, _ = new(big.Int).SetString("-95051", 10)
 	p128.Gx, _ = new(big.Int).SetString("182", 10)
 	p128.Gy, _ = new(big.Int).SetString("85518893674295321206118380980485522083", 10)
 	p128.BitSize = 128
@@ -218,7 +309,7 @@ func initP128V1() {
 	p128v1.P, _ = new(big.Int).SetString("233970423115425145524320034830162017933", 10)
 	p128v1.N, _ = new(big.Int).SetString("233970423115425145550826547352470124412", 10)
 	p128v1.B, _ = new(big.Int).SetString("210", 10)
-	p128v1.A, _ = new(big.Int).SetString("95051", 10)
+	p128v1.A, _ = new(big.Int).SetString("-95051", 10)
 	p128v1.Gx, _ = new(big.Int).SetString("182", 10)
 	p128v1.Gy, _ = new(big.Int).SetString("85518893674295321206118380980485522083", 10)
 	p128v1.BitSize = 128
@@ -229,7 +320,7 @@ func initP128V2() {
 	p128v2.P, _ = new(big.Int).SetString("233970423115425145524320034830162017933", 10)
 	p128v2.N, _ = new(big.Int).SetString("233970423115425145544350131142039591210", 10)
 	p128v2.B, _ = new(big.Int).SetString("504", 10)
-	p128v2.A, _ = new(big.Int).SetString("95051", 10)
+	p128v2.A, _ = new(big.Int).SetString("-95051", 10)
 	p128v2.Gx, _ = new(big.Int).SetString("182", 10)
 	p128v2.Gy, _ = new(big.Int).SetString("85518893674295321206118380980485522083", 10)
 	p128v2.BitSize = 128
@@ -240,7 +331,7 @@ func initP128V3() {
 	p128v3.P, _ = new(big.Int).SetString("233970423115425145524320034830162017933", 10)
 	p128v3.N, _ = new(big.Int).SetString("233970423115425145545378039958152057148", 10)
 	p128v3.B, _ = new(big.Int).SetString("727", 10)
-	p128v3.A, _ = new(big.Int).SetString("95051", 10)
+	p128v3.A, _ = new(big.Int).SetString("-95051", 10)
 	p128v3.Gx, _ = new(big.Int).SetString("182", 10)
 	p128v3.Gy, _ = new(big.Int).SetString("85518893674295321206118380980485522083", 10)
 	p128v3.BitSize = 128
@@ -251,7 +342,7 @@ func initP48() {
 	p48.P, _ = new(big.Int).SetString("146150163733117", 10)
 	p48.N, _ = new(big.Int).SetString("146150168402890", 10)
 	p48.B, _ = new(big.Int).SetString("1242422", 10)
-	p48.A = new(big.Int).Sub(p48.P, big.NewInt(544333))
+	p48.A, _ = new(big.Int).SetString("544333", 10)
 	p48.Gx, _ = new(big.Int).SetString("27249639878388", 10)
 	p48.Gy, _ = new(big.Int).SetString("14987583413657", 10)
 	p48.BitSize = 48

@@ -23,6 +23,7 @@ var (
 	zero = big.NewInt(0)
 	one  = big.NewInt(1)
 	two  = big.NewInt(2)
+	four = big.NewInt(4)
 )
 
 func ScalarBaseMult(k []byte) *big.Int {
@@ -33,19 +34,101 @@ func ScalarMult(in *big.Int, k []byte) *big.Int {
 	return ladder(in, new(big.Int).SetBytes(k))
 }
 
+// polynomial returns u^3 + Au^2 + u
+func polynomial(u *big.Int) *big.Int {
+	u3 := new(big.Int).Mul(u, u)
+	u3.Mul(u3, u)
+
+	u2 := new(big.Int).Mul(u, u)
+	u2.Mul(u2, A)
+
+	u3.Add(u3, u2)
+	u3.Add(u3, u)
+	u3.Mod(u3, P)
+
+	return u3
+}
+
 func IsOnCurve(u, v *big.Int) bool {
-	panic("not implemented")
-	return false
+	// v^2 = u^3 + Au^2 + u
+	newV := new(big.Int).Mul(v, v)
+	newV.Mod(newV, P)
+
+	return newV.Cmp(polynomial(u)) == 0
 }
 
 func cswap(x, y *big.Int, b bool) (u, v *big.Int) {
-	panic("not implemented")
-	return nil, nil
+	if b {
+		x, y = y, x
+	}
+	return x, y
 }
 
 func ladder(u, k *big.Int) *big.Int {
-	panic("not implemented")
-	return nil
+	u2, w2 := big.NewInt(1), big.NewInt(0)
+	u3, w3 := new(big.Int).Set(u), big.NewInt(1)
+
+	for i := P.BitLen() - 1; i >= 0; i-- {
+
+		// b := 1 & (k >> i)
+		b := new(big.Int).And(big.NewInt(1), new(big.Int).Rsh(k, uint(i)))
+
+		// u2, u3 := cswap(u2, u3, b)
+		// w2, w3 := cswap(w2, w3, b)
+		u2, u3 = cswap(u2, u3, b.Cmp(big.NewInt(1)) == 0)
+		w2, w3 = cswap(w2, w3, b.Cmp(big.NewInt(1)) == 0)
+
+		// u3 := (u2*u3 - w2*w3)^2
+		// w3 := u * (u2*w3 - w2*u3)^2
+
+		// t := u2*u3 - w2*w3
+		// tt := u2*w3 - w2*u3
+		t := new(big.Int).Sub(new(big.Int).Mul(u2, u3), new(big.Int).Mul(w2, w3))
+		tt := new(big.Int).Sub(new(big.Int).Mul(u2, w3), new(big.Int).Mul(w2, u3))
+
+		u3 = new(big.Int).Mul(t, t)
+		u3.Mod(u3, P)
+
+		w3 = new(big.Int).Mul(tt, tt)
+		w3 = new(big.Int).Mul(w3, u)
+		w3.Mod(w3, P)
+
+		// u2 := (u2^2 - w2^2)^2
+		// w2 := 4*u2*w2 * (u2^2 + A*u2*w2 + w2^2)
+
+		// t := u2^2
+		// tt := w2^2
+		// ttt := u2*w2
+
+		t = new(big.Int).Mul(u2, u2)
+		tt = new(big.Int).Mul(w2, w2)
+		ttt := new(big.Int).Mul(u2, w2)
+
+		u2.Sub(t, tt)
+		u2.Mul(u2, u2)
+		u2.Mod(u2, P)
+
+		w2.Mul(ttt, four)
+
+		// tttt := u2^2 + A*u2*w2 + w2^2 = t + A*ttt + tt
+		tttt := new(big.Int).Mul(ttt, A)
+		tttt.Add(tttt, tt)
+		tttt.Add(tttt, t)
+
+		w2.Mul(w2, tttt)
+		w2.Mod(w2, P)
+
+		// u2, u3 := cswap(u2, u3, b)
+		// w2, w3 := cswap(w2, w3, b)
+		u2, u3 = cswap(u2, u3, b.Cmp(big.NewInt(1)) == 0)
+		w2, w3 = cswap(w2, w3, b.Cmp(big.NewInt(1)) == 0)
+	}
+
+	// return u2 * w2^(p-2)
+	exp := new(big.Int).Exp(w2, new(big.Int).Sub(P, two), P)
+	u2.Mul(u2, exp)
+	u2.Mod(u2, P)
+	return u2
 }
 
 func GenerateKey(rng io.Reader) (priv []byte, pub *big.Int, err error) {
